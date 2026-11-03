@@ -17,7 +17,7 @@ spec:
       initContainers:
         - name: db-init
           image: postgres:16-alpine
-          command: ["sh", "-c", "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f /sql/targeting-init.sql"]
+          command: ["sh", "-c", "/sql/ensure-db.sh /sql/targeting-init.sql"]
           env:
             - name: DATABASE_URL
               valueFrom: { secretKeyRef: { name: togglemaster-runtime, key: TARGETING_DATABASE_URL } }

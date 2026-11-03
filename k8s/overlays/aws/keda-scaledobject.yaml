@@ -1,0 +1,32 @@
+# Escala o analytics-service pela profundidade da fila SQS (Opção B, conta pessoal).
+# O KEDA usa a própria role IRSA (togglemaster-keda-irsa) para ler a fila.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: analytics-sqs-auth
+  namespace: togglemaster
+spec:
+  podIdentity:
+    provider: aws
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: analytics-service
+  namespace: togglemaster
+spec:
+  scaleTargetRef:
+    name: analytics-service
+  minReplicaCount: 0      # fila vazia -> nenhum pod
+  maxReplicaCount: 8
+  pollingInterval: 10     # segundos entre leituras da fila
+  cooldownPeriod: 90      # espera antes de voltar a 0
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: analytics-sqs-auth
+      metadata:
+        queueURLFromEnv: AWS_SQS_URL
+        awsRegion: us-east-1
+        queueLength: "20"           # 1 pod para cada 20 mensagens visíveis
+        scaleOnInFlight: "true"

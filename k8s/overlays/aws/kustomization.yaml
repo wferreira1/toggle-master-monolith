@@ -2,21 +2,32 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../../base
+  - keda-scaledobject.yaml
 patches:
+  # Role IRSA criada pelo eksctl (infra/eksctl-cluster.yaml)
   - path: serviceaccount-patch.yaml
+  # Na conta pessoal o analytics escala por KEDA; remove o HPA de CPU da base
+  # para não haver dois controladores disputando as réplicas.
+  - patch: |-
+      $patch: delete
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: analytics-service
+        namespace: togglemaster
 images:
   - name: togglemaster/auth-service
-    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/togglemaster-auth-service
+    newName: 335756107330.dkr.ecr.us-east-1.amazonaws.com/togglemaster-auth-service
     newTag: v1
   - name: togglemaster/flag-service
-    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/togglemaster-flag-service
+    newName: 335756107330.dkr.ecr.us-east-1.amazonaws.com/togglemaster-flag-service
     newTag: v1
   - name: togglemaster/targeting-service
-    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/togglemaster-targeting-service
+    newName: 335756107330.dkr.ecr.us-east-1.amazonaws.com/togglemaster-targeting-service
     newTag: v1
   - name: togglemaster/evaluation-service
-    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/togglemaster-evaluation-service
+    newName: 335756107330.dkr.ecr.us-east-1.amazonaws.com/togglemaster-evaluation-service
     newTag: v1
   - name: togglemaster/analytics-service
-    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/togglemaster-analytics-service
+    newName: 335756107330.dkr.ecr.us-east-1.amazonaws.com/togglemaster-analytics-service
     newTag: v1

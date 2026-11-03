@@ -22,5 +22,6 @@ configMapGenerator:
       - sql/flags-init.sql
       - sql/targeting-init.sql
       - sql/seed-service-key.sh
+      - sql/ensure-db.sh
 generatorOptions:
   disableNameSuffixHash: true

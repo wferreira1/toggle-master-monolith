@@ -1,25 +1,64 @@
+# Cluster EKS da Fase 2 (Opção B: conta pessoal).
+# eksctl create cluster -f infra/eksctl-cluster.yaml
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
 metadata:
   name: togglemaster-fase2
   region: us-east-1
+  version: "1.37"
+  tags:
+    project: togglemaster
+    phase: "2"
 
+availabilityZones: ["us-east-1a", "us-east-1b"]
+
+# VPC nova: 2 subnets públicas (Load Balancer) e 2 privadas (nós, RDS, ElastiCache).
 vpc:
+  cidr: 10.0.0.0/16
   nat:
     gateway: Single
 
+# IRSA: cada pod recebe só as permissões AWS de que precisa, sem chaves estáticas.
+iam:
+  withOIDC: true
+  serviceAccounts:
+    # evaluation-service (envia para a SQS) e analytics-service (lê a SQS e grava no DynamoDB)
+    - metadata:
+        name: togglemaster-app
+        namespace: togglemaster
+      roleName: togglemaster-app-irsa
+      attachPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [sqs:SendMessage, sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes, sqs:GetQueueUrl]
+            Resource: "arn:aws:sqs:us-east-1:*:togglemaster-events"
+          - Effect: Allow
+            Action: [dynamodb:PutItem, dynamodb:DescribeTable]
+            Resource: "arn:aws:dynamodb:us-east-1:*:table/ToggleMasterAnalytics"
+    # KEDA lê a profundidade da fila para escalar o analytics-service
+    - metadata:
+        name: keda-operator
+        namespace: keda
+      roleName: togglemaster-keda-irsa
+      attachPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [sqs:GetQueueAttributes]
+            Resource: "arn:aws:sqs:us-east-1:*:togglemaster-events"
+
 managedNodeGroups:
-  - name: togglemaster-workers
-    instanceType: t3.small
+  - name: togglemaster-nodes
+    # Free plan da AWS só aceita tipos "free-tier-eligible"; o c7i-flex.large (2 vCPU,
+    # 4 GiB, até 29 pods/nó) é o maior x86 da lista. Conta paga: t3.medium basta.
+    instanceType: c7i-flex.large
     minSize: 1
     desiredCapacity: 2
     maxSize: 4
     privateNetworking: true
-    volumeSize: 30
+    volumeSize: 20
     volumeType: gp3
-    iam:
-      withAddonPolicies:
-        autoScaler: true
-        ebs: true
-        cloudWatch: true
+    labels:
+      role: workers

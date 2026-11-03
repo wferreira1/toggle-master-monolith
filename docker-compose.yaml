@@ -5,13 +5,18 @@ name: togglemaster-fase2
 # fluxo evaluation -> SQS -> analytics funcionar localmente, defina no arquivo
 # .env (não versionado) a URL de uma fila SQS real:
 #   LOCAL_SQS_URL=https://sqs.us-east-1.amazonaws.com/<conta>/togglemaster-events-local
-# As credenciais vêm de ~/.aws (montado somente leitura).
+# Credenciais: ~/.aws/credentials (montado somente leitura) ou variáveis de
+# ambiente. Com `aws login`/SSO, exporte credenciais temporárias antes de subir:
+#   eval "$(aws configure export-credentials --format env)" && docker compose up -d
 # Sem LOCAL_SQS_URL, o evaluation só registra os eventos no log.
 
 x-aws: &aws
   AWS_REGION: us-east-1
   AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
   AWS_CONFIG_FILE: /aws/config
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
 
 services:
   auth-service:
