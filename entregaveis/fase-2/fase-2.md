@@ -11,7 +11,7 @@
 
 | Item | Link |
 |---|---|
-| Repositório | https://github.com/dougls/toggle-master-monolith |
+| Repositório | https://github.com/wferreira1/toggle-master-monolith/tree/main |
 | Diagrama de arquitetura | [`docs/arquitetura-fase-2.mmd`](../../docs/arquitetura-fase-2.mmd) |
 | Análise da arquitetura | [`docs/ARQUITETURA-FASE-2.md`](../../docs/ARQUITETURA-FASE-2.md) |
 | Vídeo de demonstração | A preencher após a gravação |
