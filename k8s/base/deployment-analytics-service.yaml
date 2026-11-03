@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-service
+  namespace: togglemaster
+  labels: { app: analytics-service, app.kubernetes.io/part-of: togglemaster }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: analytics-service }
+  template:
+    metadata:
+      labels: { app: analytics-service, app.kubernetes.io/part-of: togglemaster }
+    spec:
+      serviceAccountName: togglemaster-app
+      containers:
+        - name: analytics-service
+          image: togglemaster/analytics-service:latest
+          ports:
+            - { name: http, containerPort: 8005 }
+          envFrom:
+            - configMapRef: { name: togglemaster-config }
+          env:
+            - { name: PORT, value: "8005" }
+            - name: AWS_SQS_URL
+              valueFrom: { secretKeyRef: { name: togglemaster-runtime, key: AWS_SQS_URL } }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 300m, memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20

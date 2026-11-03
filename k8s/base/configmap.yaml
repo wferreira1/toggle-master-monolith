@@ -4,10 +4,9 @@ metadata:
   name: togglemaster-config
   namespace: togglemaster
 data:
-  PORT: "8080"
   AWS_REGION: us-east-1
-  EVENT_BUS_DRIVER: sqs
-  ANALYTICS_TABLE: togglemaster-analytics
+  # DNS interno dos Services ClusterIP (porta 80 -> porta do contêiner)
+  AUTH_SERVICE_URL: http://auth-service
   FLAG_SERVICE_URL: http://flag-service
   TARGETING_SERVICE_URL: http://targeting-service
-  REDIS_QUEUE_KEY: analytics-events
+  AWS_DYNAMODB_TABLE: ToggleMasterAnalytics

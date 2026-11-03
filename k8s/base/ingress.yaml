@@ -1,41 +1,42 @@
+# Rotas públicas pelo Nginx Ingress (um único Load Balancer).
+# Os paths são os mesmos dos serviços oficiais, então não precisam de rewrite:
+#   /flags    -> flag-service        /rules -> targeting-service
+#   /evaluate -> evaluation-service
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: togglemaster
   namespace: togglemaster
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: 2m
 spec:
   ingressClassName: nginx
   rules:
-    - host: togglemaster.example.com
-      http:
+    - http:
         paths:
-          - path: /auth
-            pathType: Prefix
-            backend:
-              service:
-                name: auth-service
-                port:
-                  number: 80
           - path: /flags
             pathType: Prefix
-            backend:
-              service:
-                name: flag-service
-                port:
-                  number: 80
-          - path: /targeting
+            backend: { service: { name: flag-service, port: { number: 80 } } }
+          - path: /rules
             pathType: Prefix
-            backend:
-              service:
-                name: targeting-service
-                port:
-                  number: 80
-          - path: /evaluation
+            backend: { service: { name: targeting-service, port: { number: 80 } } }
+          - path: /evaluate
             pathType: Prefix
-            backend:
-              service:
-                name: evaluation-service
-                port:
-                  number: 80
+            backend: { service: { name: evaluation-service, port: { number: 80 } } }
+---
+# O auth-service expõe /validate e /admin/keys na raiz. Publicamos sob /auth e
+# removemos o prefixo: /auth/validate -> /validate, /auth/admin/keys -> /admin/keys.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: togglemaster-auth
+  namespace: togglemaster
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /auth(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend: { service: { name: auth-service, port: { number: 80 } } }

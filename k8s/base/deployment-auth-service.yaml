@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: togglemaster
+  labels: { app: auth-service, app.kubernetes.io/part-of: togglemaster }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: auth-service }
+  template:
+    metadata:
+      labels: { app: auth-service, app.kubernetes.io/part-of: togglemaster }
+    spec:
+      serviceAccountName: togglemaster-app
+      # Os serviços oficiais não criam as tabelas: o init.sql roda antes da app (idempotente).
+      initContainers:
+        - name: db-init
+          image: postgres:16-alpine
+          command: ["sh", "-c", "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f /sql/auth-init.sql && /sql/seed-service-key.sh"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: togglemaster-runtime, key: AUTH_DATABASE_URL } }
+            - name: SERVICE_API_KEY
+              valueFrom: { secretKeyRef: { name: togglemaster-runtime, key: SERVICE_API_KEY } }
+          volumeMounts:
+            - { name: sql, mountPath: /sql }
+      volumes:
+        - name: sql
+          configMap: { name: togglemaster-sql, defaultMode: 0755 }
+      containers:
+        - name: auth-service
+          image: togglemaster/auth-service:latest
+          ports:
+            - { name: http, containerPort: 8001 }
+          envFrom:
+            - configMapRef: { name: togglemaster-config }
+          env:
+            - { name: PORT, value: "8001" }
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: togglemaster-runtime, key: AUTH_DATABASE_URL } }
+            - name: MASTER_KEY
+              valueFrom: { secretKeyRef: { name: togglemaster-runtime, key: MASTER_KEY } }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 128Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20

@@ -1,44 +1,31 @@
+# evaluation-service: hot path, escala por CPU (requisito mínimo do desafio).
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: evaluation-service
   namespace: togglemaster
 spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: evaluation-service
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: evaluation-service }
   minReplicas: 2
-  maxReplicas: 6
-  behavior:
-    scaleUp:
-      stabilizationWindowSeconds: 0
-    scaleDown:
-      stabilizationWindowSeconds: 60
+  maxReplicas: 8
   metrics:
     - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+  behavior:
+    scaleUp: { stabilizationWindowSeconds: 0 }
+    scaleDown: { stabilizationWindowSeconds: 60 }
 ---
+# analytics-service: HPA por CPU (caminho AWS Academy). Na conta pessoal usamos
+# KEDA pela profundidade da fila (k8s/aws/keda-scaledobject.yaml) e este HPA é removido.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: analytics-service
   namespace: togglemaster
 spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: analytics-service
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: analytics-service }
   minReplicas: 1
   maxReplicas: 6
   metrics:
     - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }

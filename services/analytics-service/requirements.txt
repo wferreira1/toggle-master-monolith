@@ -1,4 +1,7 @@
 Flask==2.2.2
 gunicorn==20.1.0
 python-dotenv==0.21.0
-boto3==1.26.50
+# >=1.28.57 permite apontar para o DynamoDB Local via AWS_ENDPOINT_URL_DYNAMODB, sem mudar o código
+boto3==1.35.99
+# Flask 2.2.2 não fixa o Werkzeug; o 3.x quebra o import de url_quote
+Werkzeug==2.2.2

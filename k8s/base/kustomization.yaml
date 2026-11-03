@@ -5,11 +5,22 @@ resources:
   - namespace.yaml
   - serviceaccount.yaml
   - configmap.yaml
-  - deployment-auth.yaml
-  - deployment-flag.yaml
-  - deployment-targeting.yaml
-  - deployment-evaluation.yaml
-  - deployment-analytics.yaml
+  - deployment-auth-service.yaml
+  - deployment-flag-service.yaml
+  - deployment-targeting-service.yaml
+  - deployment-evaluation-service.yaml
+  - deployment-analytics-service.yaml
   - services.yaml
   - ingress.yaml
   - hpa.yaml
+# Schemas oficiais (cópias de services/*/db/init.sql) usados pelos initContainers.
+# O kustomize não lê arquivos fora deste diretório, por isso as cópias.
+configMapGenerator:
+  - name: togglemaster-sql
+    files:
+      - sql/auth-init.sql
+      - sql/flags-init.sql
+      - sql/targeting-init.sql
+      - sql/seed-service-key.sh
+generatorOptions:
+  disableNameSuffixHash: true

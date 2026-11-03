@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evaluation-service
+  namespace: togglemaster
+  labels: { app: evaluation-service, app.kubernetes.io/part-of: togglemaster }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: evaluation-service }
+  template:
+    metadata:
+      labels: { app: evaluation-service, app.kubernetes.io/part-of: togglemaster }
+    spec:
+      serviceAccountName: togglemaster-app
+      containers:
+        - name: evaluation-service
+          image: togglemaster/evaluation-service:latest
+          ports:
+            - { name: http, containerPort: 8004 }
+          envFrom:
+            - configMapRef: { name: togglemaster-config }
+          env:
+            - { name: PORT, value: "8004" }
+            - name: REDIS_URL
+              valueFrom: { secretKeyRef: { name: togglemaster-runtime, key: REDIS_URL } }
+            - name: SERVICE_API_KEY
+              valueFrom: { secretKeyRef: { name: togglemaster-runtime, key: SERVICE_API_KEY } }
+            - name: AWS_SQS_URL
+              valueFrom: { secretKeyRef: { name: togglemaster-runtime, key: AWS_SQS_URL } }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 300m, memory: 128Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20

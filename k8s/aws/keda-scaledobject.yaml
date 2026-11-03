@@ -24,6 +24,6 @@ spec:
       authenticationRef:
         name: analytics-sqs-auth
       metadata:
-        queueURLFromEnv: SQS_QUEUE_URL
+        queueURLFromEnv: AWS_SQS_URL
         awsRegion: us-east-1
         queueLength: "5"
