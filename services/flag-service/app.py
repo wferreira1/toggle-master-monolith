@@ -1,132 +1,226 @@
 import os
-import time
-from datetime import datetime, timezone
-
+import sys
 import psycopg2
-from flask import Flask, jsonify, request
+import requests
+from psycopg2.extras import RealDictCursor
+from psycopg2.pool import SimpleConnectionPool
+from flask import Flask, request, jsonify
+from dotenv import load_dotenv
+from functools import wraps
+import logging
+
+# Configura o logging
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
+# Carrega .env para desenvolvimento local
+load_dotenv() 
 
 app = Flask(__name__)
 
+# --- Configuração ---
+DATABASE_URL = os.getenv("DATABASE_URL")
+AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL")
 
-def database_url() -> str:
-    return os.getenv(
-        "FLAGS_DATABASE_URL",
-        "postgres://user:password@postgres-flags:5432/flags?sslmode=disable",
-    )
+if not DATABASE_URL or not AUTH_SERVICE_URL:
+    log.critical("Erro: DATABASE_URL e AUTH_SERVICE_URL devem ser definidos.")
+    sys.exit(1)
 
+# --- Pool de Conexão com o Banco ---
+# Inicializa o pool de conexões (Mín: 1, Máx: 5 conexões)
+try:
+    pool = SimpleConnectionPool(1, 5, dsn=DATABASE_URL)
+    log.info("Pool de conexões com o PostgreSQL inicializado.")
+except psycopg2.OperationalError as e:
+    log.critical(f"Erro fatal ao conectar ao PostgreSQL: {e}")
+    sys.exit(1)
 
-def connection():
-    return psycopg2.connect(database_url())
-
-
-def init_db() -> None:
-    last_error = None
-    for _ in range(30):
+# --- Middleware de Autenticação ---
+def require_auth(f):
+    """ Middleware para validar a chave de API contra o auth-service """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get("Authorization")
+        if not auth_header:
+            return jsonify({"error": "Authorization header obrigatório"}), 401
+        
         try:
-            with connection() as conn, conn.cursor() as cur:
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS flags (
-                        id SERIAL PRIMARY KEY,
-                        name VARCHAR(100) UNIQUE NOT NULL,
-                        is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                        description TEXT,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    )
-                    """
-                )
-            return
-        except psycopg2.Error as exc:
-            last_error = exc
-            time.sleep(2)
-    raise RuntimeError(f"could not initialize flags database: {last_error}")
+            # Chama o /validate do auth-service
+            validate_url = f"{AUTH_SERVICE_URL}/validate"
+            response = requests.get(validate_url, headers={"Authorization": auth_header}, timeout=3)
+            
+            if response.status_code != 200:
+                log.warning(f"Falha na validação da chave (status: {response.status_code})")
+                return jsonify({"error": "Chave de API inválida"}), 401
+        
+        except requests.exceptions.Timeout:
+            log.error("Timeout ao conectar com o auth-service")
+            return jsonify({"error": "Serviço de autenticação indisponível (timeout)"}), 504 # Gateway Timeout
+        except requests.exceptions.RequestException as e:
+            log.error(f"Erro ao conectar com o auth-service: {e}")
+            return jsonify({"error": "Serviço de autenticação indisponível"}), 503 # Service Unavailable
 
+        # Se a chave for válida, continua para a rota
+        return f(*args, **kwargs)
+    return decorated
 
-def flag_json(row):
-    return {
-        "id": row[0],
-        "name": row[1],
-        "is_enabled": row[2],
-        "description": row[3],
-        "created_at": row[4].isoformat() if row[4] else None,
-        "updated_at": row[5].isoformat() if row[5] else None,
-    }
+# --- Endpoints da API ---
 
-
-@app.get("/health")
+@app.route('/health')
 def health():
+    return jsonify({"status": "ok"})
+
+@app.route('/flags', methods=['POST'])
+@require_auth
+def create_flag():
+    """ Cria uma nova definição de feature flag """
+    data = request.get_json()
+    if not data or 'name' not in data:
+        return jsonify({"error": "'name' é obrigatório"}), 400
+    
+    name = data['name']
+    description = data.get('description', '')
+    is_enabled = data.get('is_enabled', False)
+    
+    conn = None
+    cur = None
     try:
-        with connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-        return jsonify(status="ok")
-    except psycopg2.Error:
-        return jsonify(status="degraded", error="database unavailable"), 503
-
-
-@app.route("/flags", methods=["GET", "POST"])
-def flags():
-    if request.method == "GET":
-        with connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, name, is_enabled, description, created_at, updated_at FROM flags ORDER BY name"
-            )
-            return jsonify([flag_json(row) for row in cur.fetchall()])
-
-    payload = request.get_json(silent=True) or {}
-    name = str(payload.get("name", "")).strip()
-    if not name:
-        return jsonify(error="name is required"), 400
-    try:
-        with connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO flags (name, is_enabled, description)
-                VALUES (%s, %s, %s)
-                RETURNING id, name, is_enabled, description, created_at, updated_at
-                """,
-                (name, bool(payload.get("is_enabled", False)), payload.get("description")),
-            )
-            return jsonify(flag_json(cur.fetchone())), 201
-    except psycopg2.errors.UniqueViolation:
-        return jsonify(error="flag already exists"), 409
-
-
-@app.route("/flags/<string:name>", methods=["GET", "PUT", "DELETE"])
-def flag(name: str):
-    if request.method == "GET":
-        with connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, name, is_enabled, description, created_at, updated_at FROM flags WHERE name = %s",
-                (name,),
-            )
-            row = cur.fetchone()
-            return jsonify(flag_json(row)) if row else (jsonify(error="flag not found"), 404)
-
-    if request.method == "DELETE":
-        with connection() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM flags WHERE name = %s", (name,))
-            if cur.rowcount == 0:
-                return jsonify(error="flag not found"), 404
-        return jsonify(message="flag deleted")
-
-    payload = request.get_json(silent=True) or {}
-    if not isinstance(payload.get("is_enabled"), bool):
-        return jsonify(error="is_enabled must be boolean"), 400
-    with connection() as conn, conn.cursor() as cur:
+        conn = pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(
-            """
-            UPDATE flags
-            SET is_enabled = %s, description = COALESCE(%s, description), updated_at = CURRENT_TIMESTAMP
-            WHERE name = %s
-            RETURNING id, name, is_enabled, description, created_at, updated_at
-            """,
-            (payload["is_enabled"], payload.get("description"), name),
+            "INSERT INTO flags (name, description, is_enabled, created_at, updated_at) "
+            "VALUES (%s, %s, %s, NOW(), NOW()) RETURNING *",
+            (name, description, is_enabled)
         )
-        row = cur.fetchone()
-        return jsonify(flag_json(row)) if row else (jsonify(error="flag not found"), 404)
+        new_flag = cur.fetchone()
+        conn.commit()
+        log.info(f"Flag '{name}' criada com sucesso.")
+        return jsonify(new_flag), 201
+    except psycopg2.IntegrityError:
+        if conn: conn.rollback()
+        log.warning(f"Tentativa de criar flag duplicada: '{name}'")
+        return jsonify({"error": f"Flag '{name}' já existe"}), 409
+    except Exception as e:
+        if conn: conn.rollback()
+        log.error(f"Erro ao criar flag: {e}")
+        return jsonify({"error": "Erro interno do servidor", "details": str(e)}), 500
+    finally:
+        if cur: cur.close()
+        if conn: pool.putconn(conn)
 
+@app.route('/flags', methods=['GET'])
+@require_auth
+def get_flags():
+    """ Lista todas as feature flags """
+    conn = None
+    cur = None
+    try:
+        conn = pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM flags ORDER BY name")
+        flags = cur.fetchall()
+        return jsonify(flags)
+    except Exception as e:
+        log.error(f"Erro ao buscar flags: {e}")
+        return jsonify({"error": "Erro interno do servidor", "details": str(e)}), 500
+    finally:
+        if cur: cur.close()
+        if conn: pool.putconn(conn)
 
-if os.getenv("SKIP_DB_INIT") != "1":
-    init_db()
+@app.route('/flags/<string:name>', methods=['GET'])
+@require_auth
+def get_flag(name):
+    """ Busca uma feature flag específica pelo nome """
+    conn = None
+    cur = None
+    try:
+        conn = pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM flags WHERE name = %s", (name,))
+        flag = cur.fetchone()
+        if not flag:
+            return jsonify({"error": "Flag não encontrada"}), 404
+        return jsonify(flag)
+    except Exception as e:
+        log.error(f"Erro ao buscar flag '{name}': {e}")
+        return jsonify({"error": "Erro interno do servidor", "details": str(e)}), 500
+    finally:
+        if cur: cur.close()
+        if conn: pool.putconn(conn)
+
+@app.route('/flags/<string:name>', methods=['PUT'])
+@require_auth
+def update_flag(name):
+    """ Atualiza uma feature flag (descrição ou status 'is_enabled') """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Corpo da requisição obrigatório"}), 400
+
+    fields = []
+    values = []
+    
+    # Constrói a query dinamicamente
+    if 'description' in data:
+        fields.append("description = %s")
+        values.append(data['description'])
+    if 'is_enabled' in data:
+        fields.append("is_enabled = %s")
+        values.append(data['is_enabled'])
+    
+    if not fields:
+        return jsonify({"error": "Pelo menos um campo ('description', 'is_enabled') é obrigatório"}), 400
+    
+    values.append(name) # Adiciona o 'name' para a cláusula WHERE
+    
+    query = f"UPDATE flags SET {', '.join(fields)} WHERE name = %s RETURNING *"
+    
+    conn = None
+    cur = None
+    try:
+        conn = pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(query, tuple(values))
+        
+        if cur.rowcount == 0:
+            return jsonify({"error": "Flag não encontrada"}), 404
+            
+        updated_flag = cur.fetchone()
+        conn.commit()
+        log.info(f"Flag '{name}' atualizada com sucesso.")
+        return jsonify(updated_flag), 200
+    except Exception as e:
+        if conn: conn.rollback()
+        log.error(f"Erro ao atualizar flag '{name}': {e}")
+        return jsonify({"error": "Erro interno do servidor", "details": str(e)}), 500
+    finally:
+        if cur: cur.close()
+        if conn: pool.putconn(conn)
+
+@app.route('/flags/<string:name>', methods=['DELETE'])
+@require_auth
+def delete_flag(name):
+    """ Deleta uma feature flag """
+    conn = None
+    cur = None
+    try:
+        conn = pool.getconn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM flags WHERE name = %s", (name,))
+        
+        if cur.rowcount == 0:
+            return jsonify({"error": "Flag não encontrada"}), 404
+            
+        conn.commit()
+        log.info(f"Flag '{name}' deletada com sucesso.")
+        return "", 204 # 204 No Content
+    except Exception as e:
+        if conn: conn.rollback()
+        log.error(f"Erro ao deletar flag '{name}': {e}")
+        return jsonify({"error": "Erro interno do servidor", "details": str(e)}), 500
+    finally:
+        if cur: cur.close()
+        if conn: pool.putconn(conn)
+
+if __name__ == '__main__':
+    port = int(os.getenv("PORT", 8002))
+    app.run(host='0.0.0.0', port=port, debug=False)
