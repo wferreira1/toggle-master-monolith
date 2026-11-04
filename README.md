@@ -67,6 +67,7 @@ Substitua o account ID e a tag no overlay `k8s/overlays/aws/kustomization.yaml`,
 
 ## Documentação da entrega
 
+- [Vídeo da Fase 2](https://youtu.be/L5yOFp3EYJU)
 - [Relatório da Fase 2](entregaveis/fase-2/fase-2.md)
 - [Arquitetura da Fase 2](docs/ARQUITETURA-FASE-2.md)
 - [Diagrama Mermaid](docs/arquitetura-fase-2.mmd)
